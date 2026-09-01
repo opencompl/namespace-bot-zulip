@@ -30,9 +30,11 @@ Configuration (environment variables):
                              no file needs mounting).
   ZULIPRC                    Path to the bot's zuliprc file (default: ./zuliprc),
                              used only when the ZULIP_* vars above are not set.
-  SHELL_BOT_ALLOWED_SENDERS  Comma-separated sender emails allowed to run
-                             commands. REQUIRED — the bot refuses everyone if
-                             this is empty.
+  SHELL_BOT_ALLOWED_SENDERS  Comma-separated sender emails and/or numeric Zulip
+                             user IDs allowed to run commands. REQUIRED — the
+                             bot refuses everyone if this is empty. Realms that
+                             hide email addresses report senders as
+                             user<id>@<realm>; use user IDs there.
   SHELL_BOT_ALLOWED_STREAMS  Comma-separated channel (stream) names the bot will
                              act in. If empty, all channels are allowed. When
                              set, DMs are ignored unless SHELL_BOT_ALLOW_DMS=true.
@@ -77,6 +79,11 @@ ALLOWED_SENDERS = {
     for e in os.environ.get("SHELL_BOT_ALLOWED_SENDERS", "").split(",")
     if e.strip()
 }
+# Entries may be emails or numeric Zulip user IDs. Realms that hide email
+# addresses report senders as user<id>@<realm>, so the ID form is the only one
+# that reliably matches there.
+ALLOWED_SENDER_IDS = {int(e) for e in ALLOWED_SENDERS if e.isdigit()}
+ALLOWED_SENDER_EMAILS = {e for e in ALLOWED_SENDERS if not e.isdigit()}
 ALLOWED_STREAMS = {
     s.strip().lower()
     for s in os.environ.get("SHELL_BOT_ALLOWED_STREAMS", "").split(",")
@@ -586,7 +593,8 @@ def handle_message(message: dict) -> None:
         return  # no known prefix — ignore silently
 
     sender = message["sender_email"].lower()
-    if sender not in ALLOWED_SENDERS:
+    if (sender not in ALLOWED_SENDER_EMAILS
+            and message["sender_id"] not in ALLOWED_SENDER_IDS):
         safe_send(
             reply_target(message,
                          f"Sorry, {message['sender_full_name']} — you're not "
@@ -667,6 +675,30 @@ def reply_target(message: dict, text: str) -> dict:
     }
 
 
+def warn_unmatchable_senders() -> None:
+    """Flag allowlisted emails that no account in the realm can ever send as.
+
+    Zulip realms with restricted email visibility report every sender as
+    user<id>@<realm>, so a real email in the allowlist silently matches nobody.
+    """
+    try:
+        members = client.get_members()["members"]
+    except Exception as exc:  # diagnostics only — never block startup
+        print(f"Could not verify the sender allowlist against the realm: {exc}")
+        return
+    known_emails = {m["email"].lower() for m in members}
+    unmatchable = sorted(ALLOWED_SENDER_EMAILS - known_emails)
+    if not unmatchable:
+        return
+    print("WARNING: these allowlisted senders match no account in this realm "
+          f"and will be refused: {', '.join(unmatchable)}")
+    print("         This realm reports senders as user<id>@<realm>; list the "
+          "numeric user IDs in SHELL_BOT_ALLOWED_SENDERS instead:")
+    for m in sorted(members, key=lambda m: m["full_name"]):
+        if not m.get("is_bot"):
+            print(f"           {m['user_id']:>10}  {m['full_name']}")
+
+
 def main() -> None:
     if not ALLOWED_SENDERS:
         sys.exit(
@@ -675,6 +707,7 @@ def main() -> None:
         )
     print(f"Shell bot running as {BOT_EMAIL} (id {BOT_ID}).")
     print(f"Allowed senders: {', '.join(sorted(ALLOWED_SENDERS))}")
+    warn_unmatchable_senders()
     print(f"Per-thread shells enabled (max {MAX_SESSIONS}); shell prefix '{COMMAND_PREFIX}'.")
     if claude_client is not None:
         print(f"Claude assistant enabled: model {CLAUDE_MODEL}, prefix '{CLAUDE_PREFIX}'.")

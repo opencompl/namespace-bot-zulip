@@ -31,6 +31,13 @@ with the output. Direct-message it a command, or @-mention it in a stream.
 
    The bot refuses to start if the allowlist is empty.
 
+   Allowlist entries may be emails or numeric Zulip user IDs. If your
+   organization hides email addresses, Zulip reports every sender as
+   `user<id>@<realm>` and an entry with a real email will never match — use
+   user IDs there. The bot prints a warning at startup listing every
+   allowlisted address no account in the realm can send as, along with the
+   user IDs to use instead.
+
 ## Usage
 
 Commands must start with `!` (configurable via `SHELL_BOT_PREFIX`); anything else
@@ -152,7 +159,7 @@ runs unless you attach a `persistent` volume.
 | Variable | Default | Purpose |
 |---|---|---|
 | `ZULIPRC` | `zuliprc` | Path to the bot's credentials file |
-| `SHELL_BOT_ALLOWED_SENDERS` | *(required)* | Comma-separated sender emails allowed to run commands |
+| `SHELL_BOT_ALLOWED_SENDERS` | *(required)* | Comma-separated sender emails and/or numeric Zulip user IDs allowed to run commands |
 | `SHELL_BOT_ALLOWED_STREAMS` | *(all)* | Comma-separated channel names the bot acts in; empty = all |
 | `SHELL_BOT_ALLOW_DMS` | `true` (`false` if streams set) | Whether to honor direct messages |
 | `SHELL_BOT_PREFIX` | `!` | Messages must start with this to run as a command; others ignored |
